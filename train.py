@@ -49,8 +49,8 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras import backend as K
 
 # Set some parameters
-IMG_WIDTH = 448
-IMG_HEIGHT = 448
+IMG_WIDTH = 256
+IMG_HEIGHT = 256
 IMG_CHANNELS = 3
 TRAIN_PATH = '/hdd/dataset/nuclei_dataset/stage1_train/'
 TEST_PATH = '/hdd/dataset/nuclei_dataset/stage1_test/'
@@ -213,7 +213,7 @@ def custom_loss(y_true_, y_pred_):
 # In[6]:
 
 
-from keras.layers import Lambda, Add, Activation, UpSampling2D, Dropout
+from keras.layers import Lambda, Add, Activation, UpSampling2D, Dropout, BatchNormalization
 from keras.optimizers import Adam
 
 def build_stage(inputs, last=None, id_='st1'):
@@ -227,31 +227,33 @@ def build_stage(inputs, last=None, id_='st1'):
 
         fs[1] += f-np.sum(fs) # reminding channels allocate to 3x3 conv
 
-        c1x1 = conv(fs[0], 1, act='linear') (inputs)
+        c1x1 = conv(fs[0], 1, act=None) (inputs)
         c3x3 = conv(max(1, fs[1]//2), 1, act='elu') (inputs)
         c5x5 = conv(max(1, fs[2]//2), 1, act='elu') (inputs)
         cpool= MaxPooling2D(pool_size=(3, 3), strides=(1, 1), padding='same') (inputs)
 
-        c3x3 = conv(fs[1], 3, act='linear') (c3x3)
-        c5x5 = conv(fs[2], 5, act='linear') (c5x5)
-        cpool= conv(fs[3], 1, act='linear') (cpool)
+        c3x3 = conv(fs[1], 3, act=None) (c3x3)
+        c5x5 = conv(fs[2], 5, act=None) (c5x5)
+        cpool= conv(fs[3], 1, act=None) (cpool)
 
         output = concatenate([c1x1, c3x3, c5x5, cpool], axis=-1)
         if dropout>0:
             output = Dropout(dropout) (output)
         return output
 
-    def _res_conv(inputs, f, k=3, dropout=0.1): # very simple residual module
+    def _res_conv(inputs, f, k=3, dropout=0, bn=True): # very simple residual module
         channels = int(inputs.shape[-1])
 
         cs = _incept_conv(inputs, f, dropout=dropout)
 
         if f!=channels:
-            t1 = conv(f, 1, 'linear') (inputs) # identity mapping
+            t1 = conv(f, 1, None) (inputs) # identity mapping
         else:
             t1 = inputs
 
         out = Add()([t1, cs]) # t1 + c2
+        if bn:
+            out = BatchNormalization() (out)
         out = Activation('elu') (out)
         return out
     def pool():
@@ -265,7 +267,7 @@ def build_stage(inputs, last=None, id_='st1'):
     if last is None:
         c1 = Lambda(lambda x: x / 255) (inputs) # 1st stage input, an image
     else:
-        c1 = Add()([inputs, last]) # dimensions of inputs, last are same
+        c1 = concatenate([inputs, last], axis=-1)
 
     c1 = _res_conv(c1, 32, 3)
     c1 = _res_conv(c1, 32, 3)
@@ -316,7 +318,9 @@ def build_stage(inputs, last=None, id_='st1'):
     c11 = _res_conv(c11, 32, 3)
     c11 = _res_conv(c11, 32, 3)
 
-    outputs = Conv2D(2, (1, 1), activation='sigmoid', name=id_+'_out') (c11)
+    outputs = Conv2D(2, (1, 1), activation=None) (c11)
+    outputs = BatchNormalization() (outputs)
+    outputs = Activation('sigmoid', name=id_+'_out') (outputs)
     return outputs, o1
 
 inputs = Input((IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS))
@@ -468,8 +472,8 @@ from sklearn.model_selection import train_test_split
 X_train, X_val, Y_train, Y_val = train_test_split(X_train, Y_train, test_size=0.1, shuffle=True)
 
 # Fit model
-BS=10
-EPOCHS=300
+BS=32
+EPOCHS=3
 
 os.makedirs('./models', exist_ok=True)
 
@@ -508,15 +512,15 @@ history = model.fit_generator(data_generator(X_train, Y_train, batch_size=BS, tr
 w = model.get_weights()
 np.save('weights.npy', w)
 
-cpu_model.compile(loss=custom_loss, metrics=[mean_iou, mean_iou_marker], optimizer='adam')
-cpu_model.set_weights(w)
-cpu_model.save('model.h5')
-del cpu_model
 del model
+import gc
+gc.collect()
 
-
-# In[ ]:
-
+with tf.device("/cpu:0"):
+    cpu_model.compile(loss=custom_loss, metrics=[mean_iou, mean_iou_marker], optimizer='adam')
+    cpu_model.set_weights(w)
+    cpu_model.save('model.h5')
+del cpu_model
 
 plt.plot(history.history['mean_iou'])
 plt.plot(history.history['val_mean_iou'])
@@ -525,10 +529,6 @@ plt.ylabel('mean_iou')
 plt.xlabel('epoch')
 plt.legend(['train','valid'], loc='upper left')
 plt.savefig('07.png')
-
-
-# In[ ]:
-
 
 plt.plot(history.history['mean_iou_marker'])
 plt.plot(history.history['val_mean_iou_marker'])
