@@ -473,7 +473,7 @@ X_train, X_val, Y_train, Y_val = train_test_split(X_train, Y_train, test_size=0.
 
 # Fit model
 BS=32
-EPOCHS=3
+EPOCHS=400
 
 os.makedirs('./models', exist_ok=True)
 
