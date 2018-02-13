@@ -484,8 +484,8 @@ from sklearn.model_selection import train_test_split
 X_train, X_val, Y_train, Y_val = train_test_split(X_train, Y_train, test_size=0.1, shuffle=True)
 
 # Fit model
-BS=16
-EPOCHS=1000
+BS=20
+EPOCHS=2000
 
 # earlystopper = EarlyStopping(patience=7, verbose=1)
 # checkpointer = ModelCheckpoint('./models/model.{epoch:03d}.vl.{val_loss:.2f}.vi.{val_mean_iou:.2f}.vim.{val_mean_iou_marker:.2f}.h5', verbose=1, save_best_only=False)
