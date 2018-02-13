@@ -13,6 +13,7 @@
 
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+import gc
 import sys
 import random
 import warnings
@@ -49,8 +50,8 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras import backend as K
 
 # Set some parameters
-IMG_WIDTH = 256
-IMG_HEIGHT = 256
+IMG_WIDTH = 448
+IMG_HEIGHT = 448
 IMG_CHANNELS = 3
 TRAIN_PATH = '/hdd/dataset/nuclei_dataset/stage1_train/'
 TEST_PATH = '/hdd/dataset/nuclei_dataset/stage1_test/'
@@ -472,10 +473,8 @@ from sklearn.model_selection import train_test_split
 X_train, X_val, Y_train, Y_val = train_test_split(X_train, Y_train, test_size=0.1, shuffle=True)
 
 # Fit model
-BS=32
-EPOCHS=400
-
-os.makedirs('./models', exist_ok=True)
+BS=10
+EPOCHS=1000
 
 # earlystopper = EarlyStopping(patience=7, verbose=1)
 # checkpointer = ModelCheckpoint('./models/model.{epoch:03d}.vl.{val_loss:.2f}.vi.{val_mean_iou:.2f}.vim.{val_mean_iou_marker:.2f}.h5', verbose=1, save_best_only=False)
@@ -493,34 +492,27 @@ class CKPT(Callback):
     def on_epoch_end(self, epoch, logs=None):
         val_loss = logs['val_loss']
         if val_loss < self.best:
-            save_path = self.path + ('.%.4f'%val_loss) + '.npy'
+            save_path = self.path
             sys.stderr.write('loss improved from %.4f to %.4f, saving model to %s\n'%(self.best, val_loss, save_path))
-            w = self.model.get_weights()
-            np.save(save_path, w)
+            self.model.save_weights(save_path)
             self.best = val_loss
+
+best_weights_path = './top_weights.h5'
 
 history = model.fit_generator(data_generator(X_train, Y_train, batch_size=BS, training=True),
                               steps_per_epoch=len(X_train) // BS , epochs=EPOCHS,
                               validation_data=data_generator(X_val, Y_val, batch_size=BS, training=False),
                               validation_steps=len(X_val) // BS,
-                              callbacks=[CKPT('./models/weights')])
-
-
-# In[ ]:
-
-
-w = model.get_weights()
-np.save('weights.npy', w)
-
+                              callbacks=[CKPT(best_weights_path)])
 del model
-import gc
 gc.collect()
 
 with tf.device("/cpu:0"):
     cpu_model.compile(loss=custom_loss, metrics=[mean_iou, mean_iou_marker], optimizer='adam')
-    cpu_model.set_weights(w)
+    cpu_model.load_weights(best_weights_path, by_name=True)
     cpu_model.save('model.h5')
 del cpu_model
+gc.collect()
 
 plt.plot(history.history['mean_iou'])
 plt.plot(history.history['val_mean_iou'])
