@@ -50,8 +50,8 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras import backend as K
 
 # Set some parameters
-IMG_WIDTH = 448
-IMG_HEIGHT = 448
+IMG_WIDTH = 256
+IMG_HEIGHT = 256
 IMG_CHANNELS = 3
 TRAIN_PATH = '/hdd/dataset/nuclei_dataset/stage1_train/'
 TEST_PATH = '/hdd/dataset/nuclei_dataset/stage1_test/'
@@ -220,7 +220,8 @@ from keras.optimizers import Adam
 def build_stage(inputs, last=None, id_='st1'):
     def conv(f, k=3, act='elu'):
         return Conv2D(f, (k, k), activation=act, kernel_initializer='he_normal', padding='same')
-    def _incept_conv(inputs, f, dropout=0, chs=[0.15, 0.5, 0.25, 0.1]):
+    def _incept_conv(input_shape, f, dropout=0, chs=[0.15, 0.5, 0.25, 0.1]):
+        inputs = Input(shape=input_shape)
         fs = [] # determine channel number
         for k in chs:
             t = max(int(k*f), 1) # at least 1 channel
@@ -240,23 +241,33 @@ def build_stage(inputs, last=None, id_='st1'):
         output = concatenate([c1x1, c3x3, c5x5, cpool], axis=-1)
         if dropout>0:
             output = Dropout(dropout) (output)
-        return output
+        return Model(inputs, output)
 
-    def _res_conv(inputs, f, k=3, dropout=0, bn=True): # very simple residual module
-        channels = int(inputs.shape[-1])
+    def _res_conv(f, k=3, dropout=0, bn=True): # very simple residual module
+        def block(inputs):
 
-        cs = _incept_conv(inputs, f, dropout=dropout)
+            channels = int(inputs.shape[-1])
+            cols = int(inputs.shape[-2])
+            rows = int(inputs.shape[-3])
 
-        if f!=channels:
-            t1 = conv(f, 1, None) (inputs) # identity mapping
-        else:
-            t1 = inputs
+            # here: mpoly-2 in polynet
+            f_inception_shared = _incept_conv((rows, cols, channels), f, dropout=dropout)
+            g_inception_shared = _incept_conv((rows, cols, f), f, dropout=dropout)
 
-        out = Add()([t1, cs]) # t1 + c2
-        if bn:
-            out = BatchNormalization() (out)
-        out = Activation('elu') (out)
-        return out
+            f0 = f_inception_shared (inputs) # f
+            g1 = g_inception_shared (f0) # f*g
+
+            if f!=channels:
+                t1 = conv(f, 1, None) (inputs) # identity mapping
+            else:
+                t1 = inputs
+
+            out = Add()([t1, f0, g1]) # t1 + f + g
+            if bn:
+                out = BatchNormalization() (out)
+            out = Activation('elu') (out)
+            return out
+        return block
     def pool():
         return MaxPooling2D((2, 2))
     def up(inputs, dropout=0):
@@ -270,54 +281,54 @@ def build_stage(inputs, last=None, id_='st1'):
     else:
         c1 = concatenate([inputs, last], axis=-1)
 
-    c1 = _res_conv(c1, 32, 3)
-    c1 = _res_conv(c1, 32, 3)
+    c1 = _res_conv(32, 3) (c1)
+    #c1 = _res_conv(32, 3) (c1)
     o1 = c1
     p1 = pool() (c1)
 
-    c2 = _res_conv(p1, 64, 3)
-    c2 = _res_conv(c2, 64, 3)
+    c2 = _res_conv(64, 3) (p1)
+    #c2 = _res_conv(64, 3) (c2)
     p2 = pool() (c2)
 
-    c3 = _res_conv(p2, 128, 3)
-    c3 = _res_conv(c3, 128, 3)
+    c3 = _res_conv(128, 3) (p2)
+    #c3 = _res_conv(128, 3) (c3)
     p3 = pool() (c3)
 
-    c4 = _res_conv(p3, 256, 3)
-    c4 = _res_conv(c4, 256, 3)
+    c4 = _res_conv(256, 3) (p3)
+    #c4 = _res_conv(256, 3) (c4)
     p4 = pool() (c4)
 
-    c5 = _res_conv(p4, 512, 3)
-    c5 = _res_conv(c5, 512, 3)
+    c5 = _res_conv(512, 3) (p4)
+    #c5 = _res_conv(512, 3) (c5)
     p5 = pool() (c5)
 
-    c6 = _res_conv(p5, 1024, 3)
-    c6 = _res_conv(c6, 1024, 3)
+    c6 = _res_conv(1024, 3) (p5)
+    #c6 = _res_conv(1024, 3) (c6)
 
     u7 = up (c6)
     c7 = concatenate([u7, c5])
-    c7 = _res_conv(c7, 512, 3)
-    c7 = _res_conv(c7, 512, 3)
+    c7 = _res_conv(512, 3) (c7)
+    #c7 = _res_conv(512, 3) (c7)
 
     u8 = up (c7)
     c8 = concatenate([u8, c4])
-    c8 = _res_conv(c8, 256, 3)
-    c8 = _res_conv(c8, 256, 3)
+    c8 = _res_conv(256, 3) (c8)
+    #c8 = _res_conv(256, 3) (c8)
 
     u9 = up (c8)
     c9 = concatenate([u9, c3])
-    c9 = _res_conv(c9, 128, 3)
-    c9 = _res_conv(c9, 128, 3)
+    c9 = _res_conv(128, 3) (c9)
+    #c9 = _res_conv(128, 3) (c9)
 
     u10 = up (c9)
     c10 = concatenate([u10, c2])
-    c10 = _res_conv(c10, 64, 3)
-    c10 = _res_conv(c10, 64, 3)
+    c10 = _res_conv(64, 3) (c10)
+    #c10 = _res_conv(64, 3) (c10)
 
     u11 = up (c10)
     c11 = concatenate([u11, c1])
-    c11 = _res_conv(c11, 32, 3)
-    c11 = _res_conv(c11, 32, 3)
+    c11 = _res_conv(32, 3) (c11)
+    #c11 = _res_conv(32, 3) (c11)
 
     outputs = Conv2D(2, (1, 1), activation=None) (c11)
     outputs = BatchNormalization() (outputs)
@@ -473,7 +484,7 @@ from sklearn.model_selection import train_test_split
 X_train, X_val, Y_train, Y_val = train_test_split(X_train, Y_train, test_size=0.1, shuffle=True)
 
 # Fit model
-BS=10
+BS=16
 EPOCHS=1000
 
 # earlystopper = EarlyStopping(patience=7, verbose=1)
