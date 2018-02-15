@@ -354,17 +354,35 @@ with tf.device("/cpu:0"):
 
 from keras.preprocessing.image import ImageDataGenerator
 import cv2
-
 from sklearn.utils import shuffle
-def data_generator(data, label, batch_size=4, training=True):
-    index = 0
-    dat_que = np.empty((batch_size, IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), dtype=np.uint8)
-    lab_que = np.empty((batch_size, IMG_HEIGHT, IMG_WIDTH, 2), dtype=np.bool)
-    while True:
-        img = data[index%len(data)] # [0,255]
-        lab = label[index%len(data)][0]
-        marker = label[index%len(data)][1]
-        if training:
+from keras.utils import Sequence
+
+class data_generator(Sequence):
+    def __init__(self, data, label, batch_size=4, training=True):
+        self.data = data
+        self.label= label
+        self.batch_size = batch_size
+        self.training = training
+    def __len__(self):
+        return math.ceil(len(self.data) / self.batch_size)
+    def __getitem__(self, index):
+        base = index*self.batch_size
+        limit= min(len(self.data), (index+1)*self.batch_size)
+        batch_index = range(base, limit)
+        dat_que = np.empty((limit-base, IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), dtype=np.uint8)
+        lab_que = np.empty((limit-base, IMG_HEIGHT, IMG_WIDTH, 2), dtype=np.bool)
+        for i, index in enumerate(batch_index):
+            img, lab, marker = self.fetch_data(index)
+            dat_que[i,:,:,:] = img
+            lab_que[i,:,:,0] = lab
+            lab_que[i,:,:,1] = marker
+        return dat_que, lab_que
+
+    def fetch_data(self, index):
+        img = self.data[index] # [0,255]
+        lab = self.label[index][0]
+        marker = self.label[index][1]
+        if self.training:
             if np.random.rand() < .5: # flip vertical
                 img = np.flip(img, 0)
                 lab = np.flip(lab, 0)
@@ -452,32 +470,7 @@ def data_generator(data, label, batch_size=4, training=True):
         marker[marker<130] = 0
         marker[marker>0] = 1
 
-        dat_que[index%batch_size,:,:,:] = img
-        lab_que[index%batch_size,:,:,0] = lab
-        lab_que[index%batch_size,:,:,1] = marker
-        index = index + 1
-        if index%batch_size==0:
-            index = 0 if index%len(data)==0 else index
-            yield (dat_que, lab_que)
-        if training and index%len(data)==0:
-            data, label = shuffle(data, label)
-            #sys.stderr.write('a epoch done!\n')
-
-
-# In[8]:
-
-
-batch_X, batch_Y = next(data_generator(X_train, Y_train, training=True, batch_size=1))
-plt.imshow(np.squeeze(batch_X[0]))
-plt.savefig('04.png')
-plt.imshow(np.squeeze(batch_Y[0,...,0]))
-plt.savefig('05.png')
-plt.imshow(np.squeeze(batch_Y[0,...,1]))
-plt.savefig('06.png')
-
-
-# In[9]:
-
+        return img, lab, marker
 
 from sklearn.model_selection import train_test_split
 
@@ -510,11 +503,11 @@ class CKPT(Callback):
 
 best_weights_path = './top_weights.h5'
 
-history = model.fit_generator(data_generator(X_train, Y_train, batch_size=BS, training=True),
+model.fit_generator(data_generator(X_train, Y_train, batch_size=BS, training=True),
                               steps_per_epoch=len(X_train) // BS , epochs=EPOCHS,
                               validation_data=data_generator(X_val, Y_val, batch_size=BS, training=False),
                               validation_steps=len(X_val) // BS,
-                              callbacks=[CKPT(best_weights_path)])
+                              callbacks=[CKPT(best_weights_path)], shuffle=True, workers=6)
 del model
 gc.collect()
 
@@ -525,44 +518,6 @@ with tf.device("/cpu:0"):
 del cpu_model
 gc.collect()
 
-plt.plot(history.history['mean_iou'])
-plt.plot(history.history['val_mean_iou'])
-plt.title('model mean_iou')
-plt.ylabel('mean_iou')
-plt.xlabel('epoch')
-plt.legend(['train','valid'], loc='upper left')
-plt.savefig('07.png')
-
-plt.plot(history.history['mean_iou_marker'])
-plt.plot(history.history['val_mean_iou_marker'])
-plt.title('model mean_iou_marker')
-plt.ylabel('mean_iou_marker')
-plt.xlabel('epoch')
-plt.legend(['train','valid'], loc='upper left')
-plt.savefig('08.png')
-
-
-# In[ ]:
-
-
-plt.plot(history.history['loss'])
-plt.plot(history.history['val_loss'])
-plt.title('model loss')
-plt.ylabel('loss')
-plt.xlabel('epoch')
-plt.legend(['train','valid'], loc='upper right')
-plt.savefig('09.png')
-
-
-# All right, looks good! Loss seems to be a bit erratic, though. I'll leave it to you to improve the model architecture and parameters!
-#
-# # Make predictions
-#
-# Let's make predictions both on the test set, the val set and the train set (as a sanity check). Remember to load the best saved model if you've used early stopping and checkpointing.
-
-# In[ ]:
-
-
 from skimage.morphology import closing, square, remove_small_objects
 from skimage.segmentation import clear_border
 
@@ -570,7 +525,7 @@ from skimage.segmentation import clear_border
 model = load_model('./model.h5', custom_objects={'mean_iou': mean_iou, 'custom_loss': custom_loss, 'mean_iou_marker': mean_iou_marker, 'dice_coef': dice_coef})
 preds_train = model.predict_generator(data_generator(X_train, Y_train, batch_size=1, training=False), steps=len(X_train), verbose=1)
 preds_val = model.predict_generator(data_generator(X_val, Y_val, batch_size=1, training=False), steps=len(X_val), verbose=1)
-preds_test = model.predict(X_test, verbose=1, batch_size=10)
+preds_test = model.predict(X_test, verbose=1, batch_size=1)
 
 preds_train, preds_train_marker = preds_train[...,0], preds_train[...,1]
 preds_val, preds_val_marker = preds_val[...,0], preds_val[...,1]
