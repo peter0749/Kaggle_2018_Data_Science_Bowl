@@ -50,8 +50,8 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras import backend as K
 
 # Set some parameters
-IMG_WIDTH = 256
-IMG_HEIGHT = 256
+IMG_WIDTH = 448
+IMG_HEIGHT = 448
 IMG_CHANNELS = 3
 TRAIN_PATH = '/hdd/dataset/nuclei_dataset/stage1_train/'
 TEST_PATH = '/hdd/dataset/nuclei_dataset/stage1_test/'
@@ -484,8 +484,8 @@ from sklearn.model_selection import train_test_split
 X_train, X_val, Y_train, Y_val = train_test_split(X_train, Y_train, test_size=0.1, shuffle=True)
 
 # Fit model
-BS=20
-EPOCHS=2000
+BS=10
+EPOCHS=300
 
 # earlystopper = EarlyStopping(patience=7, verbose=1)
 # checkpointer = ModelCheckpoint('./models/model.{epoch:03d}.vl.{val_loss:.2f}.vi.{val_mean_iou:.2f}.vim.{val_mean_iou_marker:.2f}.h5', verbose=1, save_best_only=False)
@@ -570,7 +570,7 @@ from skimage.segmentation import clear_border
 model = load_model('./model.h5', custom_objects={'mean_iou': mean_iou, 'custom_loss': custom_loss, 'mean_iou_marker': mean_iou_marker, 'dice_coef': dice_coef})
 preds_train = model.predict_generator(data_generator(X_train, Y_train, batch_size=1, training=False), steps=len(X_train), verbose=1)
 preds_val = model.predict_generator(data_generator(X_val, Y_val, batch_size=1, training=False), steps=len(X_val), verbose=1)
-preds_test = model.predict(X_test, verbose=1)
+preds_test = model.predict(X_test, verbose=1, batch_size=10)
 
 preds_train, preds_train_marker = preds_train[...,0], preds_train[...,1]
 preds_val, preds_val_marker = preds_val[...,0], preds_val[...,1]
